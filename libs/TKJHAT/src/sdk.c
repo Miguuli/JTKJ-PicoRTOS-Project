@@ -34,10 +34,10 @@ SOFTWARE.
 #include <tkjhat/pdm_microphone.h>
 #include <stdio.h>
 #include <math.h>
+#include "FreeRTOS.h"
+#include <task.h>
 
-
-
-
+#define pdMS_TO_TICKS(xTimeInMs) ( ( TickType_t ) ( ( ( uint64_t ) ( xTimeInMs ) * ( uint64_t ) configTICK_RATE_HZ ) / ( uint64_t ) 1000U ) )
 /* ===================================
  *  UTILITIES / FIXING HARDWARE BUGS
  * =================================== */
@@ -553,8 +553,39 @@ uint32_t veml6030_read_light() {
     //            Kerro arvo sopivalla kertoimella huomioiden 100 ms integraatioaika ja vahvistus 1/8
     //            käyttäen VEML6030-sovellussuunnitteluasiakirjan sivun 5 tietoja:https://www.vishay.com/docs/84367/designingveml6030.pdf
     //            Lopuksi tallenna arvo muuttujaan luxVal_uncorrected.
-  
-    uint32_t luxVal_uncorrected = 0; 
+    uint8_t txBuffer[1];
+    txBuffer[0] = VEML6030_ALS_REG;
+    uint8_t rxBuffer[2];
+    
+    uint8_t msb, lsb;
+    uint16_t reg;
+
+    if(i2c_write_blocking(i2c_default, VEML6030_I2C_ADDR, txBuffer, 1, true) != PICO_ERROR_GENERIC) {
+        if(i2c_read_blocking(i2c_default, VEML6030_I2C_ADDR, rxBuffer, 2, false) != PICO_ERROR_GENERIC) {
+            
+            lsb = rxBuffer[0];
+            msb = rxBuffer[1];
+            reg = (msb<<8) | lsb;
+            //printf("rxBuffer: %d", rxBuffer[0]);
+            //printf("rxBuffer: %d", rxBuffer[1]);
+            //printf("reg: %d", reg);
+
+            //return (float) (0.01 * pow(2, reg >> 12) * (reg & 0x0FFF));
+            // Muunnetaan 2-tavuinen data rxBuffer:ssa
+            // lämpötilaksi (kaava harjoitustehtävissä)
+        }
+        else {
+            printf("I2C Bus fault: read failed\n");
+        }
+    }
+    else {
+        printf("I2C Bus fault write failed\n");
+    }
+    vTaskDelay(pdMS_TO_TICKS(1000));
+    // i2c-yhteyden sulkeminen, tosin ikuinen silmukka ei koskaan päädy tänne
+    //i2c_deinit(i2c_default);
+
+    uint32_t luxVal_uncorrected = reg * 0.576; 
     if (luxVal_uncorrected>1000){
         // Polynomial is pulled from pg 10 of the datasheet. 
         // See https://github.com/sparkfun/SparkFun_Ambient_Light_Sensor_Arduino_Library/blob/efde0817bd6857863067bd1653a2cfafe6c68732/src/SparkFun_VEML6030_Ambient_Light_Sensor.cpp#L409
@@ -564,7 +595,7 @@ uint32_t veml6030_read_light() {
                             (1.0023 * luxVal_uncorrected);
         return luxVal;
     }
-    return  luxVal_uncorrected;
+    return luxVal_uncorrected;
 }
 
 
